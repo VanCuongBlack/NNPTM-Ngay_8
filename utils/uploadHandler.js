@@ -23,10 +23,20 @@ let filterImage = function (req, file, cb) {
     }
 }
 let filterExcel = function (req, file, cb) {
-    if (file.mimetype.includes('spreadsheetml')) {
+    const validMimes = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/x-excel',
+        'application/x-msexcel',
+        'text/xls',
+        'text/xlsx',
+        'application/excel'
+    ];
+    
+    if (validMimes.includes(file.mimetype) || file.mimetype.includes('spreadsheet')) {
         cb(null, true)
     } else {
-        cb(new Error("dinh dang file khong dung "))
+        cb(new Error("Định dạng file không đúng. Vui lòng upload file Excel"))
     }
 }
 module.exports = {

@@ -182,7 +182,25 @@ function generateRandomPassword(length = 16) {
     return password;
 }
 
-router.post('/import-users', uploadExcel.single('file')
+router.post('/import-users', 
+    function(req, res, next) {
+        uploadExcel.single('file')(req, res, function(err) {
+            if (err && err.code === 'LIMIT_PART_COUNT') {
+                return res.status(400).send({ message: 'Quá nhiều part' });
+            } else if (err && err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).send({ message: 'File quá lớn' });
+            } else if (err && err.code === 'LIMIT_FILE_COUNT') {
+                return res.status(400).send({ message: 'Quá nhiều file' });
+            } else if (err && err.code === 'LIMIT_FIELD_KEY') {
+                return res.status(400).send({ message: 'Reach field name limit' });
+            } else if (err && err.code === 'LIMIT_FIELD_VALUE') {
+                return res.status(400).send({ message: 'Field value too long' });
+            } else if (err) {
+                return res.status(400).send({ message: err.message || 'Upload failed' });
+            }
+            next();
+        });
+    }
     , async function (req, res, next) {
         if (!req.file) {
             res.send({
@@ -217,8 +235,52 @@ router.post('/import-users', uploadExcel.single('file')
             for (let index = 2; index <= worksheet.rowCount; index++) {
                 let errorsRow = [];
                 const element = worksheet.getRow(index);
-                let username = element.getCell(1).value;
-                let email = element.getCell(2).value;
+                
+                // Extract cell values
+                let usernameCell = element.getCell(1).value;
+                let emailCell = element.getCell(2).value;
+                
+                // Convert to string, handling various Excel cell types
+                let username = '';
+                let email = '';
+                
+                if (usernameCell) {
+                    if (typeof usernameCell === 'object') {
+                        if (usernameCell.richText && Array.isArray(usernameCell.richText)) {
+                            username = usernameCell.richText.map(rt => rt.text).join('');
+                        } else if (usernameCell.text) {
+                            username = usernameCell.text;
+                        } else if (usernameCell.result) {
+                            username = usernameCell.result;
+                        } else {
+                            username = String(usernameCell);
+                        }
+                    } else {
+                        username = String(usernameCell);
+                    }
+                }
+                
+                if (emailCell) {
+                    if (typeof emailCell === 'object') {
+                        if (emailCell.richText && Array.isArray(emailCell.richText)) {
+                            email = emailCell.richText.map(rt => rt.text).join('');
+                        } else if (emailCell.result) {
+                            // Handle Excel formulas with result property
+                            email = emailCell.result;
+                        } else if (emailCell.text) {
+                            email = emailCell.text;
+                        } else if (emailCell.hyperlink) {
+                            email = emailCell.hyperlink;
+                        } else {
+                            email = String(emailCell);
+                        }
+                    } else {
+                        email = String(emailCell);
+                    }
+                }
+                
+                username = username.trim();
+                email = email.trim();
 
                 // Validation
                 if (!username || !email) {
@@ -243,8 +305,6 @@ router.post('/import-users', uploadExcel.single('file')
                     continue;
                 }
 
-                let session = await mongoose.startSession()
-                session.startTransaction()
                 try {
                     // Generate random password
                     let randomPassword = generateRandomPassword(16)
@@ -254,15 +314,11 @@ router.post('/import-users', uploadExcel.single('file')
                         username, 
                         randomPassword, 
                         email, 
-                        userRole._id, 
-                        session
+                        userRole._id
                     )
 
                     // Send email with password
                     await sendMail(email, randomPassword, username)
-
-                    await session.commitTransaction();
-                    await session.endSession()
 
                     existingUsernames.push(username);
                     existingEmails.push(email);
@@ -278,8 +334,6 @@ router.post('/import-users', uploadExcel.single('file')
                         }
                     })
                 } catch (error) {
-                    await session.abortTransaction();
-                    await session.endSession()
                     result.push({
                         success: false,
                         row: index,
@@ -292,6 +346,7 @@ router.post('/import-users', uploadExcel.single('file')
             res.send(result)
 
         } catch (error) {
+            console.log("Error in import-users:", error);
             res.status(400).send({
                 message: error.message
             })
